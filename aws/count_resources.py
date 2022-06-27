@@ -67,6 +67,7 @@ def controller(access, secret, profile):
     # iterate through the various services to build the counts
     click.echo('Counting resources across regions. This will take a few minutes...')
     click.echo(' ')
+    eks_counter()
     ec2_counter(account_id)
     autoscaling_counter()
     balancer_counter()
@@ -99,12 +100,36 @@ def controller(access, secret, profile):
     with open(f'{account_id}-{datetime_formatted}.csv', 'w') as f:
         writer = csv.writer(f)
         # resource_counts[region]['kms keys']
-        writer.writerow(['resource_name','region', 'count'])
+        writer.writerow(['resource_name', 'region', 'count'])
         for region, resource in resource_counts.items():
             for resource_name, count in resource.items():
                 writer.writerow([resource_name, region, count])
 
+def eks_counter():
+    # get list of regions supported by EKS endpoint
+    region_list = resource_regions('eks')
 
+    # initialize cross region totals
+    total_clusters = 0
+
+    for region in region_list:
+        # print(f'region: {region}')
+        eksclient = session.client('eks', region_name=region)
+
+        # build the collections to count
+        clusters = eksclient.get_paginator('list_clusters')
+        cluster_iterator = clusters.paginate()
+
+        # count resources
+        cluster_counter = len(list(cluster_iterator))
+
+        # add to the cross region totals
+        total_clusters += cluster_counter
+
+        # Add the counts to the per-region counter
+        resource_counts[region]['clusters'] = cluster_counter
+
+    resource_totals['EKS Clusters'] = total_clusters
 
 def ec2_counter(account_id):
     # get list of regions supported by EC2 endpoint
@@ -467,7 +492,7 @@ def rds_counter():
 
 
 # Some regions do not have STS endpoints available https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_temp_enable-regions.html#id_credentials_region-endpoints
-region_exclusion_list = {'af-south-1', 'ap-east-1', 'eu-south-1', 'me-south-1'}
+region_exclusion_list = {'af-south-1', 'ap-east-1', 'ap-southeast-3', 'eu-south-1', 'me-south-1'}
 def resource_regions(resource_name):
     regions = set(session.get_available_regions(resource_name))
     regions = regions - region_exclusion_list
